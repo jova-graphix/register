@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>School Attendance Register</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'accent': '#cc6900',
+                        'accent-dark': '#a35400',
+                        'text-primary': '#000000',
+                        'text-secondary': '#333333',
+                        'bg-light': '#ffffff',
+                        'bg-page': '#f3f4f6'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Custom styles for print, if needed, or specific overrides */
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+            body {
+                background-color: #fff;
+                color: #000;
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+            }
+            th, td {
+                border: 1px solid #ccc;
+                padding: 8px;
+                text-align: left;
+            }
+        }
+        /* Custom style for disabled elements with opacity and no pointer events */
+        .pointer-events-none {
+            pointer-events: none;
+        }
+    </style>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-firestore-compat.js"></script>
+</head>
+<body class="bg-bg-page font-sans antialiased text-text-primary">
+    <div class="container mx-auto p-4 md:p-8">
+        <div class="flex items-center justify-center mb-2">
+            <img src="https://via.placeholder.com/60x60?text=Logo" alt="Jova Creative Academy Logo" class="h-12 w-12 mr-3 rounded-full">
+            <h1 class="text-3xl sm:text-4xl font-extrabold text-center text-blue-600">Jova Creative Academy</h1>
+        </div>
+        <h2 class="text-2xl sm:text-3xl font-extrabold text-center text-text-primary mb-8">School Attendance Register</h2>
+
+        <div class="bg-bg-light shadow-lg rounded-lg p-6 mb-8">
+            <div class="flex flex-col md:flex-row justify-between items-center mb-6 no-print">
+                <div class="mb-4 md:mb-0 flex items-end space-x-2">
+                    <div>
+                        <label for="class-select" class="block text-sm font-medium text-text-secondary mb-1">Select Class:</label>
+                        <select id="class-select" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-accent focus:border-accent sm:text-sm rounded-md shadow-sm">
+                            <!-- Options will be populated by JS -->
+                        </select>
+                    </div>
+                    <button id="set-password-btn" class="px-3 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 text-sm">Set/Change Password</button>
+                </div>
+                <div id="week-navigation" class="flex items-center space-x-2">
+                    <button id="prev-week-btn" class="px-4 py-2 bg-accent text-white rounded-md hover:bg-accent-dark focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 no-print">&lt; Prev Week</button>
+                    <span id="current-week-display" class="text-lg font-semibold text-text-secondary w-auto sm:w-48 text-center"></span>
+                    <button id="next-week-btn" class="px-4 py-2 bg-accent text-white rounded-md hover:bg-accent-dark focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 no-print">Next Week &gt;</button>
+                </div>
+            </div>
+
+            <!-- Login Section (initially hidden) -->
+            <div id="class-login-section" class="hidden bg-gray-50 p-6 rounded-lg shadow-inner text-center">
+                <h2 class="text-2xl font-bold text-text-primary mb-4">Enter Password for <span id="login-class-name" class="text-accent"></span></h2>
+                <form id="login-form" class="flex flex-col items-center space-y-4">
+                    <input type="password" id="class-password-input" placeholder="Password" class="block w-full max-w-sm px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-accent focus:border-accent sm:text-sm" autocomplete="off">
+                    <p id="login-error-message" class="text-red-500 text-sm"></p>
+                    <button type="submit" id="login-button" class="px-6 py-2 bg-accent-dark text-white rounded-md hover:bg-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2">Login</button>
+                </form>
+            </div>
+
+            <!-- Main Content Area (attendance table, add student, print) -->
+            <div id="main-content-area">
+                <div class="overflow-x-auto">
+                    <table id="attendance-table" class="min-w-full divide-y divide-gray-200 bg-bg-light">
+                        <thead class="bg-bg-light">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider sticky left-0 bg-bg-light z-10 w-48">Student Name</th>
+                                <!-- Day headers will be populated by JS -->
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            <!-- Student rows and attendance checkboxes will be populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="bg-bg-light shadow-lg rounded-lg p-6 mt-8 no-print" id="add-student-section">
+                    <h2 class="text-2xl font-bold text-accent mb-4">Add New Student</h2>
+                    <form id="add-student-form" class="flex flex-col sm:flex-row items-end sm:space-x-4">
+                        <div class="flex-grow mb-4 sm:mb-0">
+                            <label for="student-name" class="block text-sm font-medium text-text-secondary mb-1">Student Name:</label>
+                            <input type="text" id="student-name" name="student-name" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-accent focus:border-accent sm:text-sm" placeholder="e.g., Jane Doe">
+                        </div>
+                        <button type="submit" class="px-6 py-2 bg-accent-dark text-white rounded-md hover:bg-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2">Add Student</button>
+                    </form>
+                </div>
+
+                <div class="text-center no-print mt-8">
+                    <button id="print-button" onclick="window.print()" class="px-6 py-3 bg-accent-dark text-white rounded-md hover:bg-accent focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 text-lg">
+                        Print Current Week's Register
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center py-4 text-sm text-gray-600 mt-8">
+        © All right reserved | Jova Graphix
+    </footer>
+
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBBtqHf1KlG9DXMPWSQ_vJiczvp48VOTUY",
+            authDomain: "register-f6f37.firebaseapp.com",
+            projectId: "register-f6f37",
+            storageBucket: "register-f6f37.firebasestorage.app",
+            messagingSenderId: "672369115585",
+            appId: "1:672369115585:web:2fb65a54c7b10de457ef40"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const classPasswordsRef = db.collection('classPasswords');
+
+        // IMPORTANT SECURITY NOTE:
+        // Storing passwords directly in Firestore without proper Firebase Authentication
+        // and strict security rules is NOT recommended for production applications.
+        // For a real-world scenario, you should use Firebase Authentication to manage users
+        // and secure your database with rules that prevent unauthorized access.
+
+        const STORAGE_KEY = 'schoolAttendanceRegister';
+        let state = {};
+        let currentClassId = 'class1';
+        let pendingClassId = null; // Stores the ID of the class currently being attempted to unlock
+        let currentWeekStartDate = new Date(); // Defaults to current week
+        let currentClassUnlocked = false; // New variable to track if current class is unlocked
+        let classPasswordCache = {}; // Cache for class password status (locked/unlocked)
+        
+        // --- Utility Functions ---
+        function generateUniqueId() {
+            return '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function formatDate(date) {
+            const d = new Date(date);
+            return d.toISOString().split('T')[0]; // YYYY-MM-DD
+        }
+
+        function getWeekDays(startDate) {
+            const days = [];
+            const start = new Date(startDate);
+            start.setHours(0, 0, 0, 0);
+            // Adjust to Monday of the current week
+            const dayOfWeek = (start.getDay() + 6) % 7; // 0 for Monday, 6 for Sunday
+            start.setDate(start.getDate() - dayOfWeek);
+
+            for (let i = 0; i < 7; i++) {
+                const day = new Date(start);
+                day.setDate(start.getDate() + i);
+                days.push(day);
+            }
+            return days;
+        }
+
+        // --- Local Storage Management (for students and attendance) ---
+        function loadState() {
+            const storedState = localStorage.getItem(STORAGE_KEY);
+            if (storedState) {
+                state = JSON.parse(storedState);
+            } else {
+                // Initialize default state if nothing is stored
+                state = {
+                    classes: Array.from({ length: 9 }, (_, i) => {
+                        let name;
+                        if (i + 1 === 7) name = 'JHS 1';
+                        else if (i + 1 === 8) name = 'JHS 2';
+                        else if (i + 1 === 9) name = 'JHS 3';
+                        else name = `Class ${i + 1}`;
+                        return {
+                            id: `class${i + 1}`,
+                            name: name
+                        };
+                    }),
+                    students: {},
+                    attendance: {}
+                };
+                // Initialize empty student and attendance objects for each class
+                state.classes.forEach(cls => {
+                    state.students[cls.id] = [];
+                    state.attendance[cls.id] = {};
+                });
+            }
+            // Ensure currentClassId is valid and initialize if needed
+            if (!state.classes.some(c => c.id === currentClassId)) {
+                currentClassId = state.classes[0] ? state.classes[0].id : null;
+            }
+        }
+
+        function saveState() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+
+        // --- Firebase Password Management ---
+        async function fetchAllClassPasswords() {
+            try {
+                classPasswordCache = {}; // Clear cache
+                const snapshot = await classPasswordsRef.get();
+                snapshot.forEach(doc => {
+                    classPasswordCache[doc.id] = doc.data().password;
+                });
+            } catch (error) {
+                console.error("Error fetching class passwords:", error);
+                alert("Could not load class passwords. Please check your internet connection.");
+            }
+        }
+
+        async function getClassPassword(classId) {
+            try {
+                const doc = await classPasswordsRef.doc(classId).get();
+                return doc.exists ? doc.data().password : null;
+            } catch (error) {
+                console.error("Error getting class password:", error);
+                return null;
+            }
+        }
+
+        async function setClassPassword(classId, password) {
+            try {
+                await classPasswordsRef.doc(classId).set({ password: password });
+                classPasswordCache[classId] = password; // Update cache
+                return true;
+            } catch (error) {
+                console.error("Error setting class password:", error);
+                alert("Could not set password. Please try again.");
+                return false;
+            }
+        }
+
+        async function removeClassPassword(classId) {
+            try {
+                await classPasswordsRef.doc(classId).delete();
+                delete classPasswordCache[classId]; // Remove from cache
+                return true;
+            } catch (error) {
+                console.error("Error removing class password:", error);
+                alert("Could not remove password. Please try again.");
+                return false;
+            }
+        }
+
+        // --- Rendering Functions ---
+        async function renderClassSelector() {
+            const select = document.getElementById('class-select');
+            select.innerHTML = '';
+            // Ensure password cache is up-to-date before rendering
+            await fetchAllClassPasswords(); 
+
+            state.classes.forEach(cls => {
+                const option = document.createElement('option');
+                option.value = cls.id;
+                const isLocked = classPasswordCache[cls.id] !== undefined && classPasswordCache[cls.id] !== null;
+                option.textContent = cls.name + (isLocked ? ' (Locked)' : '');
+                select.appendChild(option);
+            });
+            select.value = currentClassId;
+        }
+
+        function renderAttendanceTable() {
+            const tableHead = document.querySelector('#attendance-table thead tr');
+            const tableBody = document.querySelector('#attendance-table tbody');
+            tableBody.innerHTML = '';
+
+            const weekDays = getWeekDays(currentWeekStartDate);
+            const currentWeekDisplay = document.getElementById('current-week-display');
+            currentWeekDisplay.textContent = `${weekDays[0].toLocaleDateString()} - ${weekDays[6].toLocaleDateString()}`;
+
+            // Clear existing headers except the first one (Student Name)
+            while (tableHead.children.length > 1) {
+                tableHead.removeChild(tableHead.lastChild);
+            }
+
+            // Add day headers
+            weekDays.forEach(day => {
+                const th = document.createElement('th');
+                th.scope = 'col';
+                th.className = 'px-6 py-3 text-center text-xs font-medium text-text-secondary uppercase tracking-wider';
+                th.textContent = day.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
+                tableHead.appendChild(th);
+            });
+
+            const studentsInClass = state.students[currentClassId] || [];
+
+            if (studentsInClass.length === 0) {
+                const row = tableBody.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = weekDays.length + 1;
+                cell.className = 'px-6 py-4 whitespace-nowrap text-center text-sm text-text-secondary';
+                cell.textContent = 'No students in this class yet. Add one below!';
+                return;
+            }
+
+            studentsInClass.forEach(student => {
+                const row = tableBody.insertRow();
+                row.className = 'hover:bg-gray-100';
+
+                const nameCell = row.insertCell();
+                nameCell.className = 'px-6 py-4 whitespace-nowrap text-sm font-medium text-text-primary sticky left-0 bg-bg-light z-0 flex items-center justify-between';
+                nameCell.innerHTML = `<span>${student.name}</span>
+                                      <button class="remove-student-btn text-red-500 hover:text-red-700 ml-2 p-1 rounded-full hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2" data-student-id="${student.id}" title="Remove Student">
+                                          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                          </svg>
+                                      </button>`;
+
+                weekDays.forEach(day => {
+                    const dateKey = formatDate(day);
+                    const attendanceStatus = state.attendance[currentClassId]?.[student.id]?.[dateKey] || false;
+
+                    const cell = row.insertCell();
+                    cell.className = 'px-6 py-4 whitespace-nowrap text-center text-sm text-text-secondary';
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.className = 'h-4 w-4 text-accent focus:ring-accent border-gray-300 rounded';
+                    checkbox.checked = attendanceStatus;
+                    checkbox.dataset.studentId = student.id;
+                    checkbox.dataset.date = dateKey;
+                    checkbox.dataset.classId = currentClassId;
+                    checkbox.disabled = !currentClassUnlocked; // Disable if class is locked
+                    checkbox.addEventListener('change', handleAttendanceToggle);
+
+                    cell.appendChild(checkbox);
+                });
+            });
+
+            // Add event listeners for remove student buttons
+            document.querySelectorAll('.remove-student-btn').forEach(button => {
+                button.addEventListener('click', (e) => handleRemoveStudent(e.currentTarget.dataset.studentId));
+            });
+        }
+
+        // --- UI State Management for Lock/Unlock ---
+        function updateUIForLockState() {
+            const classLoginSection = document.getElementById('class-login-section');
+            const mainContentArea = document.getElementById('main-content-area');
+            const studentNameInput = document.getElementById('student-name');
+            const addStudentButton = document.querySelector('#add-student-form button[type="submit"]');
+            const printButton = document.getElementById('print-button');
+            const weekNavigation = document.getElementById('week-navigation');
+            const attendanceCheckboxes = document.querySelectorAll('#attendance-table input[type="checkbox"]');
+            const removeStudentButtons = document.querySelectorAll('.remove-student-btn');
+
+            if (currentClassUnlocked) {
+                classLoginSection.classList.add('hidden');
+                mainContentArea.classList.remove('hidden');
+                mainContentArea.classList.remove('opacity-50', 'pointer-events-none');
+                weekNavigation.classList.remove('opacity-50', 'pointer-events-none');
+
+                studentNameInput.disabled = false;
+                addStudentButton.disabled = false;
+                printButton.disabled = false;
+            } else {
+                classLoginSection.classList.remove('hidden');
+                mainContentArea.classList.add('hidden');
+                mainContentArea.classList.add('opacity-50', 'pointer-events-none'); // Visually disable, though hidden
+                weekNavigation.classList.add('opacity-50', 'pointer-events-none');
+
+                studentNameInput.disabled = true;
+                addStudentButton.disabled = true;
+                printButton.disabled = true;
+            }
+
+            attendanceCheckboxes.forEach(checkbox => {
+                checkbox.disabled = !currentClassUnlocked;
+            });
+            removeStudentButtons.forEach(button => {
+                button.disabled = !currentClassUnlocked;
+            });
+        }
+
+        // --- Event Handlers ---
+        async function handleClassChange(event) {
+            const newClassId = event.target.value;
+            const selectedClass = state.classes.find(c => c.id === newClassId);
+
+            if (!selectedClass) return;
+
+            const classPassword = await getClassPassword(newClassId);
+
+            if (classPassword) {
+                pendingClassId = newClassId; // Store the class ID we're trying to unlock
+                currentClassUnlocked = false; // Set to locked state
+                document.getElementById('login-class-name').textContent = selectedClass.name; // Update login form title
+                document.getElementById('class-password-input').value = ''; // Clear previous password
+                document.getElementById('login-error-message').textContent = ''; // Clear error message
+                // currentClassId remains the last successfully unlocked class until login
+            } else {
+                // No password, unlock immediately
+                currentClassId = newClassId;
+                currentClassUnlocked = true;
+                pendingClassId = null; // No pending class
+                renderAttendanceTable();
+            }
+            updateUIForLockState();
+        }
+
+        async function handleLoginSubmit(event) {
+            event.preventDefault();
+            const passwordInput = document.getElementById('class-password-input');
+            const errorMessage = document.getElementById('login-error-message');
+            const enteredPassword = passwordInput.value;
+
+            const selectedClass = state.classes.find(c => c.id === pendingClassId);
+            if (!selectedClass) return;
+
+            const storedPassword = await getClassPassword(pendingClassId);
+
+            if (storedPassword && enteredPassword === storedPassword) {
+                currentClassId = pendingClassId; // Officially switch to the new class
+                currentClassUnlocked = true;
+                pendingClassId = null; // Clear pending
+                passwordInput.value = '';
+                errorMessage.textContent = '';
+                renderAttendanceTable();
+                updateUIForLockState(); // Hide login form, show main content
+                document.getElementById('class-select').value = currentClassId; // Ensure selector reflects actual unlocked class
+            } else {
+                errorMessage.textContent = 'Incorrect password. Please try again.';
+                passwordInput.value = '';
+            }
+        }
+
+        async function handleSetPassword() {
+            if (!currentClassId) {
+                alert('Please select a class first.');
+                return;
+            }
+            const selectedClass = state.classes.find(c => c.id === currentClassId);
+            if (!selectedClass) return;
+
+            const existingPassword = await getClassPassword(currentClassId);
+            let authenticated = false;
+
+            if (existingPassword) {
+                // Class has an existing password, user must authenticate to change it.
+                const oldPassword = prompt(`Enter current password for ${selectedClass.name} to change it:`);
+                if (oldPassword === null) return; // User cancelled
+                if (oldPassword !== existingPassword) {
+                    alert('Incorrect current password.');
+                    return;
+                }
+                authenticated = true;
+            } else {
+                // No existing password, user can set one without authentication.
+                authenticated = true;
+            }
+
+            if (!authenticated) return; // Should not be reached with current logic, but good safeguard.
+
+            const newPassword = prompt(`Set a new password for ${selectedClass.name} (leave blank to cancel):`);
+            if (newPassword === null || newPassword.trim() === '') { // User cancelled or entered blank
+                alert('Password not set. An empty password is not allowed.');
+                return;
+            }
+
+            const confirmPassword = prompt('Confirm new password:');
+            if (newPassword === confirmPassword) {
+                if (await setClassPassword(currentClassId, newPassword)) {
+                    currentClassUnlocked = true; // After setting, it's unlocked
+                    alert(`Password for ${selectedClass.name} set successfully!`);
+                    await renderClassSelector(); // Update selector text
+                    updateUIForLockState();
+                }
+            } else {
+                alert('Passwords do not match. Please try again.');
+            }
+        }
+
+        function handleWeekChange(direction) {
+            if (!currentClassUnlocked) {
+                alert('Please unlock the class to change weeks.');
+                return;
+            }
+            const date = new Date(currentWeekStartDate);
+            date.setDate(date.getDate() + (direction === 'next' ? 7 : -7));
+            currentWeekStartDate = date;
+            renderAttendanceTable();
+        }
+
+        function handleAttendanceToggle(event) {
+            if (!currentClassUnlocked) {
+                alert('Please unlock the class to modify attendance.');
+                event.target.checked = !event.target.checked; // Revert checkbox state
+                return;
+            }
+            const checkbox = event.target;
+            const { classId, studentId, date } = checkbox.dataset;
+            const isPresent = checkbox.checked;
+
+            if (!state.attendance[classId]) state.attendance[classId] = {};
+            if (!state.attendance[classId][studentId]) state.attendance[classId][studentId] = {};
+
+            state.attendance[classId][studentId][date] = isPresent;
+            saveState();
+        }
+
+        function handleAddStudent(event) {
+            event.preventDefault();
+            if (!currentClassUnlocked) {
+                alert('Please unlock the class to add students.');
+                return;
+            }
+            const studentNameInput = document.getElementById('student-name');
+            const studentName = studentNameInput.value.trim();
+
+            if (studentName && currentClassId) {
+                const newStudent = {
+                    id: generateUniqueId(),
+                    name: studentName
+                };
+                if (!state.students[currentClassId]) {
+                    state.students[currentClassId] = [];
+                }
+                state.students[currentClassId].push(newStudent);
+                saveState();
+                renderAttendanceTable();
+                studentNameInput.value = ''; // Clear input
+            } else if (!currentClassId) {
+                alert('Please select a class first.');
+            }
+        }
+
+        function handleRemoveStudent(studentIdToRemove) {
+            if (!currentClassUnlocked) {
+                alert('Please unlock the class to remove students.');
+                return;
+            }
+            if (!confirm('Are you sure you want to remove this student? This action cannot be undone.')) {
+                return;
+            }
+
+            if (state.students[currentClassId]) {
+                state.students[currentClassId] = state.students[currentClassId].filter(student => student.id !== studentIdToRemove);
+                // Also remove their attendance records
+                if (state.attendance[currentClassId] && state.attendance[currentClassId][studentIdToRemove]) {
+                    delete state.attendance[currentClassId][studentIdToRemove];
+                }
+                saveState();
+                renderAttendanceTable();
+            }
+        }
+
+        // --- Initialization ---
+        async function init() {
+            loadState();
+            await renderClassSelector(); // Await password cache and selector rendering
+
+            // Initial check for password on the default class
+            const initialClass = state.classes.find(c => c.id === currentClassId);
+            if (initialClass) {
+                const initialClassPassword = await getClassPassword(currentClassId);
+                if (initialClassPassword) {
+                    currentClassUnlocked = false;
+                    pendingClassId = currentClassId; // The class we need to log into initially
+                    document.getElementById('login-class-name').textContent = initialClass.name;
+                } else {
+                    currentClassUnlocked = true;
+                    pendingClassId = null;
+                }
+            }
+
+            renderAttendanceTable(); // Render for the initial currentClassId (will be visible if unlocked, otherwise hidden by updateUIForLockState)
+            updateUIForLockState(); // Apply initial UI lock state
+
+            // Event Listeners
+            document.getElementById('class-select').addEventListener('change', handleClassChange);
+            document.getElementById('prev-week-btn').addEventListener('click', () => handleWeekChange('prev'));
+            document.getElementById('next-week-btn').addEventListener('click', () => handleWeekChange('next'));
+            document.getElementById('add-student-form').addEventListener('submit', handleAddStudent);
+            document.getElementById('set-password-btn').addEventListener('click', handleSetPassword);
+            document.getElementById('login-form').addEventListener('submit', handleLoginSubmit);
+        }
+
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

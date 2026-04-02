@@ -1,0 +1,14 @@
+{
+  "name": "Jova Creative Academy Attendance Register",
+  "description": "A web-based student attendance register for Jova Creative Academy, featuring weekly attendance tracking, student management with removal option, local data persistence for students/attendance, and Firebase for password management. Passwords are now stored in Firebase Firestore, ensuring they are consistent across all devices. The logic for changing a class password requires authentication with the current password if one is already set. Class names 'Class 7', 'Class 8', and 'Class 9' are correctly set to 'JHS 1', 'JHS 2', and 'JHS 3' respectively.",
+  "entry": "index.html",
+  "multiPage": false,
+  "files": [
+    "index.html",
+    "metadata.json"
+  ],
+  "tailwind": {
+    "source": "play-cdn"
+  },
+  "generatedAt": "2024-07-30T13:00:00Z"
+}
