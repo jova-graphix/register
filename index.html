@@ -148,8 +148,11 @@
         // For a real-world scenario, you should use Firebase Authentication to manage users
         // and secure your database with rules that prevent unauthorized access.
 
-        const STORAGE_KEY = 'schoolAttendanceRegister';
-        let state = {};
+        let state = {
+            classes: [], // Will be populated from default or Firebase
+            students: {}, // students[classId] = [{id, name}, ...]
+            attendance: {} // attendance[classId][dateKey] = {studentId: true/false, ...}
+        };
         let currentClassId = 'class1';
         let pendingClassId = null; // Stores the ID of the class currently being attempted to unlock
         let currentWeekStartDate = new Date(); // Defaults to current week
@@ -182,15 +185,16 @@
             return days;
         }
 
-        // --- Local Storage Management (for students and attendance) ---
-        function loadState() {
-            const storedState = localStorage.getItem(STORAGE_KEY);
-            if (storedState) {
-                state = JSON.parse(storedState);
-            } else {
-                // Initialize default state if nothing is stored
-                state = {
-                    classes: Array.from({ length: 9 }, (_, i) => {
+        // --- Firebase Data Management ---
+        async function loadState() {
+            // Try to load classes from Firebase first
+            try {
+                const classesSnapshot = await db.collection('classes').orderBy('name').get();
+                if (!classesSnapshot.empty) {
+                    state.classes = classesSnapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
+                } else {
+                    // If no classes in Firebase, initialize default classes and save them
+                    state.classes = Array.from({ length: 9 }, (_, i) => {
                         let name;
                         if (i + 1 === 7) name = 'JHS 1';
                         else if (i + 1 === 8) name = 'JHS 2';
@@ -200,27 +204,37 @@
                             id: `class${i + 1}`,
                             name: name
                         };
-                    }),
-                    students: {},
-                    attendance: {}
-                };
-                // Initialize empty student and attendance objects for each class
-                state.classes.forEach(cls => {
-                    state.students[cls.id] = [];
-                    state.attendance[cls.id] = {};
-                });
+                    });
+                    // Save default classes to Firebase
+                    for (const cls of state.classes) {
+                        await db.collection('classes').doc(cls.id).set({ name: cls.name });
+                    }
+                }
+            } catch (error) {
+                console.error("Error loading classes from Firebase:", error);
+                alert("Could not load classes. Please check your internet connection. Using default local classes.");
+                // Fallback to local default if Firebase fails and no classes loaded
+                if (state.classes.length === 0) {
+                     state.classes = Array.from({ length: 9 }, (_, i) => {
+                        let name;
+                        if (i + 1 === 7) name = 'JHS 1';
+                        else if (i + 1 === 8) name = 'JHS 2';
+                        else if (i + 1 === 9) name = 'JHS 3';
+                        else name = `Class ${i + 1}`;
+                        return {
+                            id: `class${i + 1}`,
+                            name: name
+                        };
+                    });
+                }
             }
+
             // Ensure currentClassId is valid and initialize if needed
             if (!state.classes.some(c => c.id === currentClassId)) {
                 currentClassId = state.classes[0] ? state.classes[0].id : null;
             }
         }
 
-        function saveState() {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-        }
-
-        // --- Firebase Password Management ---
         async function fetchAllClassPasswords() {
             try {
                 classPasswordCache = {}; // Clear cache
@@ -268,6 +282,90 @@
             }
         }
 
+        // --- Firebase Student Management ---
+        async function fetchStudents(classId) {
+            try {
+                const studentsSnapshot = await db.collection('classes').doc(classId).collection('students').orderBy('name').get();
+                state.students[classId] = studentsSnapshot.docs.map(doc => ({ id: doc.id, name: doc.data().name }));
+            } catch (error) {
+                console.error("Error fetching students for class", classId, ":", error);
+                alert("Could not load students. Please check your internet connection.");
+                state.students[classId] = []; // Ensure it's an empty array on error
+            }
+        }
+
+        async function addStudentToFirebase(classId, student) {
+            try {
+                await db.collection('classes').doc(classId).collection('students').doc(student.id).set({ name: student.name });
+                return true;
+            } catch (error) {
+                console.error("Error adding student to Firebase:", error);
+                alert("Could not add student. Please try again.");
+                return false;
+            }
+        }
+
+        async function removeStudentFromFirebase(classId, studentId) {
+            try {
+                // 1. Delete student document
+                await db.collection('classes').doc(classId).collection('students').doc(studentId).delete();
+
+                // 2. Attempt to delete attendance records for this student across all days in this class
+                const attendanceDocsSnapshot = await db.collection('classes').doc(classId).collection('attendance').get();
+                const batch = db.batch();
+                attendanceDocsSnapshot.forEach(doc => {
+                    if (doc.data().hasOwnProperty(studentId)) {
+                        const updateData = {};
+                        updateData[studentId] = firebase.firestore.FieldValue.delete();
+                        batch.update(doc.ref, updateData);
+                    }
+                });
+                await batch.commit();
+
+                return true;
+            } catch (error) {
+                console.error("Error removing student and their attendance from Firebase:", error);
+                alert("Could not remove student and their attendance. Please try again.");
+                return false;
+            }
+        }
+
+        // --- Firebase Attendance Management ---
+        async function fetchAttendanceForWeek(classId, weekDays) {
+            state.attendance[classId] = state.attendance[classId] || {};
+            const dateKeys = weekDays.map(formatDate);
+            try {
+                // Fetch attendance for each day of the week
+                for (const dateKey of dateKeys) {
+                    const attendanceDoc = await db.collection('classes').doc(classId).collection('attendance').doc(dateKey).get();
+                    if (attendanceDoc.exists) {
+                        state.attendance[classId][dateKey] = attendanceDoc.data();
+                    } else {
+                        state.attendance[classId][dateKey] = {}; // No attendance for this day
+                    }
+                }
+            } catch (error) {
+                console.error("Error fetching attendance for week:", error);
+                alert("Could not load attendance data for this week. Please check your internet connection.");
+                // On error, ensure attendance for this class/week is cleared or empty
+                dateKeys.forEach(dateKey => state.attendance[classId][dateKey] = {});
+            }
+        }
+
+        async function updateAttendanceInFirebase(classId, studentId, dateKey, isPresent) {
+            try {
+                const attendanceDocRef = db.collection('classes').doc(classId).collection('attendance').doc(dateKey);
+                await attendanceDocRef.set({
+                    [studentId]: isPresent
+                }, { merge: true }); // Use merge to update only the specific student's attendance
+                return true;
+            } catch (error) {
+                console.error("Error updating attendance in Firebase:", error);
+                alert("Could not update attendance. Please try again.");
+                return false;
+            }
+        }
+
         // --- Rendering Functions ---
         async function renderClassSelector() {
             const select = document.getElementById('class-select');
@@ -285,7 +383,7 @@
             select.value = currentClassId;
         }
 
-        function renderAttendanceTable() {
+        async function renderAttendanceTable() {
             const tableHead = document.querySelector('#attendance-table thead tr');
             const tableBody = document.querySelector('#attendance-table tbody');
             tableBody.innerHTML = '';
@@ -307,6 +405,10 @@
                 th.textContent = day.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
                 tableHead.appendChild(th);
             });
+
+            // Fetch students and attendance for the current class/week before rendering
+            await fetchStudents(currentClassId);
+            await fetchAttendanceForWeek(currentClassId, weekDays);
 
             const studentsInClass = state.students[currentClassId] || [];
 
@@ -334,7 +436,7 @@
 
                 weekDays.forEach(day => {
                     const dateKey = formatDate(day);
-                    const attendanceStatus = state.attendance[currentClassId]?.[student.id]?.[dateKey] || false;
+                    const attendanceStatus = state.attendance[currentClassId]?.[dateKey]?.[student.id] || false;
 
                     const cell = row.insertCell();
                     cell.className = 'px-6 py-4 whitespace-nowrap text-center text-sm text-text-secondary';
@@ -419,6 +521,8 @@
                 currentClassId = newClassId;
                 currentClassUnlocked = true;
                 pendingClassId = null; // No pending class
+                await fetchStudents(currentClassId);
+                await fetchAttendanceForWeek(currentClassId, getWeekDays(currentWeekStartDate));
                 renderAttendanceTable();
             }
             updateUIForLockState();
@@ -441,6 +545,8 @@
                 pendingClassId = null; // Clear pending
                 passwordInput.value = '';
                 errorMessage.textContent = '';
+                await fetchStudents(currentClassId);
+                await fetchAttendanceForWeek(currentClassId, getWeekDays(currentWeekStartDate));
                 renderAttendanceTable();
                 updateUIForLockState(); // Hide login form, show main content
                 document.getElementById('class-select').value = currentClassId; // Ensure selector reflects actual unlocked class
@@ -496,7 +602,7 @@
             }
         }
 
-        function handleWeekChange(direction) {
+        async function handleWeekChange(direction) {
             if (!currentClassUnlocked) {
                 alert('Please unlock the class to change weeks.');
                 return;
@@ -504,10 +610,11 @@
             const date = new Date(currentWeekStartDate);
             date.setDate(date.getDate() + (direction === 'next' ? 7 : -7));
             currentWeekStartDate = date;
+            await fetchAttendanceForWeek(currentClassId, getWeekDays(currentWeekStartDate));
             renderAttendanceTable();
         }
 
-        function handleAttendanceToggle(event) {
+        async function handleAttendanceToggle(event) {
             if (!currentClassUnlocked) {
                 alert('Please unlock the class to modify attendance.');
                 event.target.checked = !event.target.checked; // Revert checkbox state
@@ -517,14 +624,17 @@
             const { classId, studentId, date } = checkbox.dataset;
             const isPresent = checkbox.checked;
 
-            if (!state.attendance[classId]) state.attendance[classId] = {};
-            if (!state.attendance[classId][studentId]) state.attendance[classId][studentId] = {};
-
-            state.attendance[classId][studentId][date] = isPresent;
-            saveState();
+            if (await updateAttendanceInFirebase(classId, studentId, date, isPresent)) {
+                if (!state.attendance[classId]) state.attendance[classId] = {};
+                if (!state.attendance[classId][date]) state.attendance[classId][date] = {};
+                state.attendance[classId][date][studentId] = isPresent;
+            } else {
+                // Revert checkbox state if Firebase update failed
+                checkbox.checked = !isPresent;
+            }
         }
 
-        function handleAddStudent(event) {
+        async function handleAddStudent(event) {
             event.preventDefault();
             if (!currentClassUnlocked) {
                 alert('Please unlock the class to add students.');
@@ -538,19 +648,20 @@
                     id: generateUniqueId(),
                     name: studentName
                 };
-                if (!state.students[currentClassId]) {
-                    state.students[currentClassId] = [];
+                if (await addStudentToFirebase(currentClassId, newStudent)) {
+                    if (!state.students[currentClassId]) {
+                        state.students[currentClassId] = [];
+                    }
+                    state.students[currentClassId].push(newStudent);
+                    renderAttendanceTable();
+                    studentNameInput.value = ''; // Clear input
                 }
-                state.students[currentClassId].push(newStudent);
-                saveState();
-                renderAttendanceTable();
-                studentNameInput.value = ''; // Clear input
             } else if (!currentClassId) {
                 alert('Please select a class first.');
             }
         }
 
-        function handleRemoveStudent(studentIdToRemove) {
+        async function handleRemoveStudent(studentIdToRemove) {
             if (!currentClassUnlocked) {
                 alert('Please unlock the class to remove students.');
                 return;
@@ -559,34 +670,53 @@
                 return;
             }
 
-            if (state.students[currentClassId]) {
-                state.students[currentClassId] = state.students[currentClassId].filter(student => student.id !== studentIdToRemove);
-                // Also remove their attendance records
-                if (state.attendance[currentClassId] && state.attendance[currentClassId][studentIdToRemove]) {
-                    delete state.attendance[currentClassId][studentIdToRemove];
+            if (await removeStudentFromFirebase(currentClassId, studentIdToRemove)) {
+                if (state.students[currentClassId]) {
+                    state.students[currentClassId] = state.students[currentClassId].filter(student => student.id !== studentIdToRemove);
                 }
-                saveState();
+                // Also remove their attendance records from local state for the current class
+                if (state.attendance[currentClassId]) {
+                    for (const dateKey in state.attendance[currentClassId]) {
+                        if (state.attendance[currentClassId][dateKey] && state.attendance[currentClassId][dateKey].hasOwnProperty(studentIdToRemove)) {
+                            delete state.attendance[currentClassId][dateKey][studentIdToRemove];
+                        }
+                    }
+                }
                 renderAttendanceTable();
             }
         }
 
         // --- Initialization ---
         async function init() {
-            loadState();
-            await renderClassSelector(); // Await password cache and selector rendering
+            await loadState(); // Populates state.classes from Firebase or defaults
+            await renderClassSelector(); // Renders class options based on state.classes and fetches passwords
 
-            // Initial check for password on the default class
-            const initialClass = state.classes.find(c => c.id === currentClassId);
-            if (initialClass) {
+            // Set initial currentClassId if not already set or if the previous one is invalid
+            if (!currentClassId || !state.classes.some(c => c.id === currentClassId)) {
+                currentClassId = state.classes[0] ? state.classes[0].id : null;
+            }
+
+            // Determine initial lock state for the currentClassId
+            if (currentClassId) {
+                const initialClass = state.classes.find(c => c.id === currentClassId);
                 const initialClassPassword = await getClassPassword(currentClassId);
                 if (initialClassPassword) {
                     currentClassUnlocked = false;
-                    pendingClassId = currentClassId; // The class we need to log into initially
+                    pendingClassId = currentClassId;
                     document.getElementById('login-class-name').textContent = initialClass.name;
                 } else {
                     currentClassUnlocked = true;
                     pendingClassId = null;
                 }
+            } else {
+                // No classes available, ensure UI is locked/disabled
+                currentClassUnlocked = false;
+            }
+
+            // If the initial class is unlocked, fetch its data
+            if (currentClassUnlocked && currentClassId) {
+                await fetchStudents(currentClassId);
+                await fetchAttendanceForWeek(currentClassId, getWeekDays(currentWeekStartDate));
             }
 
             renderAttendanceTable(); // Render for the initial currentClassId (will be visible if unlocked, otherwise hidden by updateUIForLockState)
